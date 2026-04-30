@@ -17,10 +17,23 @@
 #define TIME_TO_SLEEP  1800
 #define BLE_TIMEOUT 60000
 
+#define BUZZER_PIN 42
+#define PWM_CHANNEL 0
+#define PWM_FREQ 2000
+#define PWM_RESOLUTION 8
+
 Adafruit_BME280 bme; //czujnik
 BLECharacteristic *pCharacteristic;
 bool deviceConnected = false;
 unsigned long bootTime = 0;
+unsigned long lastBlinkTime = 0;
+
+void playBeep(int durationMS){
+  ledcWrite(PWM_CHANNEL, 128);
+  delay(durationMS);
+  ledcWrite(PWM_CHANNEL, 0);
+
+}
 
 void goToDeepSleep(){
   Serial.println("Przechodzenie do głębokiego snu...");
@@ -34,6 +47,10 @@ class MyServerCallbacks: public BLEServerCallbacks {
     void onConnect(BLEServer* pServer) {
       deviceConnected = true;
       Serial.println("Klient połączony!");
+
+      playBeep(100);
+      delay(100);
+      playBeep(100);
     };
 
     void onDisconnect(BLEServer* pServer) {
@@ -49,6 +66,11 @@ class MyServerCallbacks: public BLEServerCallbacks {
 void setup(){
   Serial.begin(115200);
   bootTime = millis();
+
+  ledcSetup(PWM_CHANNEL, PWM_FREQ, PWM_RESOLUTION); 
+  ledcAttachPin(BUZZER_PIN, PWM_CHANNEL);
+  ledcWrite(PWM_CHANNEL, 0);
+
   
   esp_sleep_wakeup_cause_t wakeupReason = esp_sleep_get_wakeup_cause();
   if (wakeupReason == ESP_SLEEP_WAKEUP_TIMER) {
@@ -57,6 +79,7 @@ void setup(){
     Serial.println("Wybudzenie urzadzenia przez przycisk 'RESET'");
   }
 
+  playBeep(200);
 
   Wire.begin(I2C_SDA, I2C_SCL); 
   if (!bme.begin(0x76, &Wire)) {
@@ -91,12 +114,17 @@ void setup(){
 }
 
 void loop(){
-  
+  unsigned long currentMillis = millis();
 
-  if(!deviceConnected && (millis() - bootTime > BLE_TIMEOUT)) {
-    Serial.println("Brak połączenia z klientem BLE w ciągu 60 sekund. Przechodzenie do głębokiego snu...");
-    goToDeepSleep();
-  } 
+  if(!deviceConnected){
+    if(currentMillis - lastBlinkTime >= 2500) {
+      lastBlinkTime = currentMillis;
+      playBeep(50);
+    }
+    if (currentMillis - bootTime > BLE_TIMEOUT) {
+      goToDeepSleep();
+    }
+  }
 
 
   float temperature = bme.readTemperature();
