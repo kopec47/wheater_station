@@ -22,11 +22,21 @@
 #define PWM_FREQ 2000
 #define PWM_RESOLUTION 8
 
+#define WIND_SENSOR_PIN 10
+
 Adafruit_BME280 bme; //czujnik
 BLECharacteristic *pCharacteristic;
 bool deviceConnected = false;
 unsigned long bootTime = 0;
 unsigned long lastBlinkTime = 0;
+
+volatile unsigned int windPulses = 0;
+unsigned long lastWindTime = 0;
+float windSpeed = 0.0;  
+
+void IRAM_ATTR windInterrupt(){
+  windPulses++;
+}
 
 void playBeep(int durationMS){
   ledcWrite(PWM_CHANNEL, 128);
@@ -66,10 +76,14 @@ class MyServerCallbacks: public BLEServerCallbacks {
 void setup(){
   Serial.begin(115200);
   bootTime = millis();
+  lastWindTime = millis();
 
   ledcSetup(PWM_CHANNEL, PWM_FREQ, PWM_RESOLUTION); 
   ledcAttachPin(BUZZER_PIN, PWM_CHANNEL);
   ledcWrite(PWM_CHANNEL, 0);
+
+  pinMode(WIND_SENSOR_PIN, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(WIND_SENSOR_PIN), windInterrupt, FALLING);
 
   
   esp_sleep_wakeup_cause_t wakeupReason = esp_sleep_get_wakeup_cause();
@@ -124,6 +138,22 @@ void loop(){
     if (currentMillis - bootTime > BLE_TIMEOUT) {
       goToDeepSleep();
     }
+  }
+
+  unsigned long deltaTime = currentMillis - lastWindTime;
+  if (deltaTime > 0){
+    noInterrupts();
+
+    unsigned int pulses = windPulses;
+    windPulses = 0; 
+    interrupts();
+
+    float pulsePerSecond = (float)pulses/ (deltaTime / 1000.0);
+
+    float windMultiplier = 1.0;
+    windSpeed = pulsePerSecond * windMultiplier;
+
+    lastWindTime = currentMillis;
   }
 
 
