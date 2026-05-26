@@ -17,10 +17,14 @@
 #define TIME_TO_SLEEP  1800
 #define BLE_TIMEOUT 60000
 
-#define BUZZER_PIN 40
+#define BUZZER_PIN 42
 #define PWM_CHANNEL 0
-#define PWM_FREQ 2000
+#define PWM_FREQ 200
 #define PWM_RESOLUTION 8
+#define BUZZER_DUTY 128
+#define STARTUP_BEEP_DURATION_MS 5000
+#define STARTUP_FREQ_TEST_DURATION_MS 1200
+#define BLE_CONNECT_BEEP_DURATION_MS 3000
 
 #define WIND_SENSOR_PIN 10
 
@@ -38,11 +42,25 @@ void IRAM_ATTR windInterrupt(){
   windPulses++;
 }
 
-void playBeep(int durationMS){
-  ledcWrite(PWM_CHANNEL, 128);
+void playTone(int frequency, int durationMS){
+  ledcSetup(PWM_CHANNEL, frequency, PWM_RESOLUTION);
+  ledcWrite(PWM_CHANNEL, BUZZER_DUTY);
   delay(durationMS);
   ledcWrite(PWM_CHANNEL, 0);
+}
 
+void playBeep(int durationMS){
+  playTone(PWM_FREQ, durationMS);
+}
+
+void testBuzzerFrequencies(){
+  const int testFrequencies[] = {200, 500, 1000, 2000, 4000};
+  for (int frequency : testFrequencies) {
+    Serial.print("Test buzzera, czestotliwosc: ");
+    Serial.println(frequency);
+    playTone(frequency, STARTUP_FREQ_TEST_DURATION_MS);
+    delay(300);
+  }
 }
 
 void goToDeepSleep(){
@@ -58,9 +76,9 @@ class MyServerCallbacks: public BLEServerCallbacks {
       deviceConnected = true;
       Serial.println("Klient połączony!");
 
-      playBeep(100);
-      delay(100);
-      playBeep(100);
+      playBeep(BLE_CONNECT_BEEP_DURATION_MS);
+      delay(500);
+      playBeep(BLE_CONNECT_BEEP_DURATION_MS);
     };
 
     void onDisconnect(BLEServer* pServer) {
@@ -98,7 +116,8 @@ void setup(){
     Serial.println("Wybudzenie urzadzenia przez przycisk 'RESET'");
   }
 
-  playBeep(200);
+  testBuzzerFrequencies();
+  playBeep(STARTUP_BEEP_DURATION_MS);
 
   Wire.begin(I2C_SDA, I2C_SCL); 
   if (!bme.begin(0x76, &Wire)) {
