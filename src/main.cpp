@@ -7,8 +7,8 @@
 #include <BLEUtils.h>
 #include <BLE2902.h>
 
-#define I2C_SDA 8
-#define I2C_SCL 9
+#define I2C_SDA 43
+#define I2C_SCL 44
 
 #define SERVICE_UUID        "12345678-1234-1234-1234-123456789abc"
 #define CHARACTERISTIC_UUID   "abcdefab-1234-5678-1234-56789abcdef0"
@@ -17,7 +17,7 @@
 #define TIME_TO_SLEEP  1800
 #define BLE_TIMEOUT 60000
 
-#define BUZZER_PIN 42
+#define BUZZER_PIN 40
 #define PWM_CHANNEL 0
 #define PWM_FREQ 2000
 #define PWM_RESOLUTION 8
@@ -75,6 +75,11 @@ class MyServerCallbacks: public BLEServerCallbacks {
 
 void setup(){
   Serial.begin(115200);
+  unsigned long serialStart = millis();
+  while (!Serial && millis() - serialStart < 3000) {
+    delay(10);
+  }
+  Serial.println("Serial start");
   bootTime = millis();
   lastWindTime = millis();
 
