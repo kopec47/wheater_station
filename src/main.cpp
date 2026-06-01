@@ -28,18 +28,60 @@
 
 #define WIND_SENSOR_PIN 10
 
+#define TRANSOPTOR_ADC_PIN 20
+#define TRANSOPTOR_THRESHOLD_MV 1650
+#define TRANSOPTOR_SAMPLE_INTERVAL_MS 5
+#define TRANSOPTOR_CALC_INTERVAL_MS 10000
+#define TRANSOPTOR_MULTIPLIER 1.5
+
 Adafruit_BME280 bme; //czujnik
 BLECharacteristic *pCharacteristic;
 bool deviceConnected = false;
 unsigned long bootTime = 0;
 unsigned long lastBlinkTime = 0;
+unsigned long lastTransoptorSampleTime = 0;
+unsigned long lastTransoptorCalcTime = 0;
 
 volatile unsigned int windPulses = 0;
 unsigned long lastWindTime = 0;
 float windSpeed = 0.0;  
 
+unsigned int transoptorRotations = 0;
+unsigned int transoptorRotationsLastWindow = 0;
+int transoptorAdcRaw = 0;
+int transoptorAdcMilliVolts = 0;
+bool transoptorSignalHigh = false;
+bool transoptorSignalInitialized = false;
+float transoptorSpeed = 0.0;
+
 void IRAM_ATTR windInterrupt(){
   windPulses++;
+}
+
+void updateTransoptorSample(unsigned long currentMillis){
+  if (currentMillis - lastTransoptorSampleTime < TRANSOPTOR_SAMPLE_INTERVAL_MS) {
+    return;
+  }
+
+  lastTransoptorSampleTime = currentMillis;
+  transoptorAdcRaw = analogRead(TRANSOPTOR_ADC_PIN);
+  transoptorAdcMilliVolts = analogReadMilliVolts(TRANSOPTOR_ADC_PIN);
+  bool currentSignalHigh = transoptorAdcMilliVolts >= TRANSOPTOR_THRESHOLD_MV;
+
+  if (transoptorSignalInitialized && transoptorSignalHigh && !currentSignalHigh) {
+    transoptorRotations++;
+  }
+
+  transoptorSignalHigh = currentSignalHigh;
+  transoptorSignalInitialized = true;
+}
+
+void delayWithTransoptorSampling(unsigned long durationMs){
+  unsigned long startTime = millis();
+  while (millis() - startTime < durationMs) {
+    updateTransoptorSample(millis());
+    delay(1);
+  }
 }
 
 void playTone(int frequency, int durationMS){
@@ -76,9 +118,7 @@ class MyServerCallbacks: public BLEServerCallbacks {
       deviceConnected = true;
       Serial.println("Klient połączony!");
 
-      playBeep(BLE_CONNECT_BEEP_DURATION_MS);
-      delay(500);
-      playBeep(BLE_CONNECT_BEEP_DURATION_MS);
+      playBeep(100);
     };
 
     void onDisconnect(BLEServer* pServer) {
@@ -100,6 +140,8 @@ void setup(){
   Serial.println("Serial start");
   bootTime = millis();
   lastWindTime = millis();
+  lastTransoptorSampleTime = millis();
+  lastTransoptorCalcTime = millis();
 
   ledcSetup(PWM_CHANNEL, PWM_FREQ, PWM_RESOLUTION); 
   ledcAttachPin(BUZZER_PIN, PWM_CHANNEL);
@@ -107,6 +149,10 @@ void setup(){
 
   pinMode(WIND_SENSOR_PIN, INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(WIND_SENSOR_PIN), windInterrupt, FALLING);
+
+  pinMode(TRANSOPTOR_ADC_PIN, INPUT);
+  analogReadResolution(12);
+  analogSetPinAttenuation(TRANSOPTOR_ADC_PIN, ADC_11db);
 
   
   esp_sleep_wakeup_cause_t wakeupReason = esp_sleep_get_wakeup_cause();
@@ -140,6 +186,7 @@ void setup(){
                     );
 
   pCharacteristic->addDescriptor(new BLE2902());
+
   pService->start();
 
   BLEAdvertising *pAdvertising = pServer->getAdvertising();
@@ -153,6 +200,7 @@ void setup(){
 
 void loop(){
   unsigned long currentMillis = millis();
+  updateTransoptorSample(currentMillis);
 
   if(!deviceConnected){
     if(currentMillis - lastBlinkTime >= 2500) {
@@ -180,6 +228,15 @@ void loop(){
     lastWindTime = currentMillis;
   }
 
+  if (currentMillis - lastTransoptorCalcTime >= TRANSOPTOR_CALC_INTERVAL_MS) {
+    unsigned int rotations = transoptorRotations;
+    transoptorRotations = 0;
+    transoptorRotationsLastWindow = rotations;
+
+    transoptorSpeed = rotations * 120.0 * TRANSOPTOR_MULTIPLIER;
+    lastTransoptorCalcTime = currentMillis;
+  }
+
 
   float temperature = bme.readTemperature();
   float humidity = bme.readHumidity();
@@ -187,7 +244,27 @@ void loop(){
   
   
 
-  String dataString = String(temperature) + "," + String(humidity) + "," + String(pressure);
+  int adcRaw = 0;
+  int adcMilliVolts = 0;
+  bool signalHigh = false;
+  unsigned int rotationsLastWindow = 0;
+
+  adcRaw = transoptorAdcRaw;
+  adcMilliVolts = transoptorAdcMilliVolts;
+  signalHigh = transoptorSignalHigh;
+  rotationsLastWindow = transoptorRotationsLastWindow;
+
+  float adcVolts = adcMilliVolts / 1000.0;
+
+  String dataString = String(temperature) + "," +
+                      String(humidity) + "," +
+                      String(pressure) + "," +
+                      String(windSpeed) + "," +
+                      String(adcRaw) + "," +
+                      String(adcVolts, 3) + "," +
+                      String(signalHigh ? 1 : 0) + "," +
+                      String(rotationsLastWindow) + "," +
+                      String(transoptorSpeed);
 
 
   if (deviceConnected) {
@@ -202,5 +279,5 @@ void loop(){
   Serial.println("Lokowanie: " + dataString);
 
 
-  delay(2000); 
+  delayWithTransoptorSampling(2000); 
 }
