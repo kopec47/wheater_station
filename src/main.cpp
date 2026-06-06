@@ -18,13 +18,12 @@
 #define BLE_TIMEOUT 60000
 
 #define BUZZER_PIN 42
-#define PWM_CHANNEL 0
-#define PWM_FREQ 200
-#define PWM_RESOLUTION 8
-#define BUZZER_DUTY 128
-#define STARTUP_BEEP_DURATION_MS 5000
-#define STARTUP_FREQ_TEST_DURATION_MS 1200
+#define STARTUP_BEEP_DURATION_MS 500
 #define BLE_CONNECT_BEEP_DURATION_MS 3000
+#define BLE_WAITING_SHORT_BEEP_MS 70
+#define BLE_WAITING_LONG_BEEP_MS 300
+#define BLE_WAITING_GAP_MS 120
+#define BLE_WAITING_PAUSE_MS 1000
 
 #define WIND_SENSOR_PIN 10
 
@@ -58,6 +57,8 @@ void IRAM_ATTR windInterrupt(){
   windPulses++;
 }
 
+void handleWaitingBeep(unsigned long currentMillis);
+
 void updateTransoptorSample(unsigned long currentMillis){
   if (currentMillis - lastTransoptorSampleTime < TRANSOPTOR_SAMPLE_INTERVAL_MS) {
     return;
@@ -79,30 +80,72 @@ void updateTransoptorSample(unsigned long currentMillis){
 void delayWithTransoptorSampling(unsigned long durationMs){
   unsigned long startTime = millis();
   while (millis() - startTime < durationMs) {
-    updateTransoptorSample(millis());
+    unsigned long currentMillis = millis();
+    updateTransoptorSample(currentMillis);
+    handleWaitingBeep(currentMillis);
     delay(1);
   }
 }
 
-void playTone(int frequency, int durationMS){
-  ledcSetup(PWM_CHANNEL, frequency, PWM_RESOLUTION);
-  ledcWrite(PWM_CHANNEL, BUZZER_DUTY);
-  delay(durationMS);
-  ledcWrite(PWM_CHANNEL, 0);
+void setBuzzer(bool enabled){
+  digitalWrite(BUZZER_PIN, enabled ? HIGH : LOW);
 }
 
 void playBeep(int durationMS){
-  playTone(PWM_FREQ, durationMS);
+  setBuzzer(true);
+  delay(durationMS);
+  setBuzzer(false);
+}
+
+void playWaitingMelodyPattern(){
+  playBeep(BLE_WAITING_SHORT_BEEP_MS);
+  delay(BLE_WAITING_GAP_MS);
+  playBeep(BLE_WAITING_SHORT_BEEP_MS);
+  delay(BLE_WAITING_GAP_MS);
+  playBeep(BLE_WAITING_LONG_BEEP_MS);
+  delay(BLE_WAITING_PAUSE_MS);
+}
+
+void handleWaitingBeep(unsigned long currentMillis){
+  const bool buzzerStates[] = {true, false, true, false, true, false};
+  const unsigned long stepDurations[] = {
+    BLE_WAITING_SHORT_BEEP_MS,
+    BLE_WAITING_GAP_MS,
+    BLE_WAITING_SHORT_BEEP_MS,
+    BLE_WAITING_GAP_MS,
+    BLE_WAITING_LONG_BEEP_MS,
+    BLE_WAITING_PAUSE_MS
+  };
+  const int stepCount = sizeof(stepDurations) / sizeof(stepDurations[0]);
+  static int currentStep = 0;
+  static bool sequenceStarted = false;
+
+  if (deviceConnected) {
+    setBuzzer(false);
+    currentStep = 0;
+    sequenceStarted = false;
+    lastBlinkTime = currentMillis;
+    return;
+  }
+
+  if (!sequenceStarted) {
+    currentStep = 0;
+    lastBlinkTime = currentMillis;
+    setBuzzer(buzzerStates[currentStep]);
+    sequenceStarted = true;
+    return;
+  }
+
+  if (currentMillis - lastBlinkTime >= stepDurations[currentStep]) {
+    currentStep = (currentStep + 1) % stepCount;
+    lastBlinkTime = currentMillis;
+    setBuzzer(buzzerStates[currentStep]);
+  }
 }
 
 void testBuzzerFrequencies(){
-  const int testFrequencies[] = {200, 500, 1000, 2000, 4000};
-  for (int frequency : testFrequencies) {
-    Serial.print("Test buzzera, czestotliwosc: ");
-    Serial.println(frequency);
-    playTone(frequency, STARTUP_FREQ_TEST_DURATION_MS);
-    delay(300);
-  }
+  Serial.println("Test buzzera aktywnego: pip-pip-piiip");
+  playWaitingMelodyPattern();
 }
 
 void goToDeepSleep(){
@@ -143,9 +186,8 @@ void setup(){
   lastTransoptorSampleTime = millis();
   lastTransoptorCalcTime = millis();
 
-  ledcSetup(PWM_CHANNEL, PWM_FREQ, PWM_RESOLUTION); 
-  ledcAttachPin(BUZZER_PIN, PWM_CHANNEL);
-  ledcWrite(PWM_CHANNEL, 0);
+  pinMode(BUZZER_PIN, OUTPUT);
+  setBuzzer(false);
 
   pinMode(WIND_SENSOR_PIN, INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(WIND_SENSOR_PIN), windInterrupt, FALLING);
@@ -203,10 +245,7 @@ void loop(){
   updateTransoptorSample(currentMillis);
 
   if(!deviceConnected){
-    if(currentMillis - lastBlinkTime >= 2500) {
-      lastBlinkTime = currentMillis;
-      playBeep(50);
-    }
+    handleWaitingBeep(currentMillis);
     if (currentMillis - bootTime > BLE_TIMEOUT) {
       goToDeepSleep();
     }
