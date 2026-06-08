@@ -234,8 +234,8 @@ void setup(){
   BLEAdvertising *pAdvertising = pServer->getAdvertising();
   pAdvertising ->addServiceUUID(SERVICE_UUID);
   pAdvertising->setScanResponse(true);
-  pAdvertising->setMinPreferred(0x06);  // Funkcja zalecana do poprawy kompatybilności z urządzeniami iOS
-  pAdvertising->setMinPreferred(0x12); // Funkcja zalecana do poprawy kompatybilności z urządzeniami iOS
+  pAdvertising->setMinPreferred(0x06);  
+  pAdvertising->setMinPreferred(0x12); 
   BLEDevice::startAdvertising();
   Serial.println("Oczekiwanie na połączenie klienta...");
 }
