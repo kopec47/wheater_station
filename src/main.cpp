@@ -17,7 +17,7 @@
 #define TIME_TO_SLEEP  1800
 #define BLE_TIMEOUT 60000
 
-#define BUZZER_PIN 42
+#define BUZZER_PIN 8
 #define STARTUP_BEEP_DURATION_MS 500
 #define BLE_CONNECT_BEEP_DURATION_MS 3000
 #define BLE_WAITING_SHORT_BEEP_MS 70
@@ -27,11 +27,13 @@
 
 #define WIND_SENSOR_PIN 10
 
-#define TRANSOPTOR_ADC_PIN 20
-#define TRANSOPTOR_THRESHOLD_MV 1650
+#define TRANSOPTOR_ADC_PIN 17
+#define TRANSOPTOR_THRESHOLD_HIGH_MV 90
+#define TRANSOPTOR_THRESHOLD_LOW_MV 50
 #define TRANSOPTOR_SAMPLE_INTERVAL_MS 5
-#define TRANSOPTOR_CALC_INTERVAL_MS 10000
-#define TRANSOPTOR_MULTIPLIER 1.5
+#define TRANSOPTOR_MIN_PULSE_INTERVAL_MS 5
+#define TRANSOPTOR_CALC_INTERVAL_MS 2000
+#define TRANSOPTOR_KMH_PER_RPS 2.0
 
 Adafruit_BME280 bme; //czujnik
 BLECharacteristic *pCharacteristic;
@@ -40,6 +42,7 @@ unsigned long bootTime = 0;
 unsigned long lastBlinkTime = 0;
 unsigned long lastTransoptorSampleTime = 0;
 unsigned long lastTransoptorCalcTime = 0;
+unsigned long lastTransoptorPulseTime = 0;
 
 volatile unsigned int windPulses = 0;
 unsigned long lastWindTime = 0;
@@ -67,10 +70,19 @@ void updateTransoptorSample(unsigned long currentMillis){
   lastTransoptorSampleTime = currentMillis;
   transoptorAdcRaw = analogRead(TRANSOPTOR_ADC_PIN);
   transoptorAdcMilliVolts = analogReadMilliVolts(TRANSOPTOR_ADC_PIN);
-  bool currentSignalHigh = transoptorAdcMilliVolts >= TRANSOPTOR_THRESHOLD_MV;
+  bool currentSignalHigh = transoptorSignalHigh;
+  if (transoptorAdcMilliVolts >= TRANSOPTOR_THRESHOLD_HIGH_MV) {
+    currentSignalHigh = true;
+  } else if (transoptorAdcMilliVolts <= TRANSOPTOR_THRESHOLD_LOW_MV) {
+    currentSignalHigh = false;
+  }
 
-  if (transoptorSignalInitialized && transoptorSignalHigh && !currentSignalHigh) {
+  if (transoptorSignalInitialized &&
+      transoptorSignalHigh &&
+      !currentSignalHigh &&
+      currentMillis - lastTransoptorPulseTime >= TRANSOPTOR_MIN_PULSE_INTERVAL_MS) {
     transoptorRotations++;
+    lastTransoptorPulseTime = currentMillis;
   }
 
   transoptorSignalHigh = currentSignalHigh;
@@ -259,11 +271,6 @@ void loop(){
     windPulses = 0; 
     interrupts();
 
-    float pulsePerSecond = (float)pulses/ (deltaTime / 1000.0);
-
-    float windMultiplier = 1.0;
-    windSpeed = pulsePerSecond * windMultiplier;
-
     lastWindTime = currentMillis;
   }
 
@@ -272,7 +279,9 @@ void loop(){
     transoptorRotations = 0;
     transoptorRotationsLastWindow = rotations;
 
-    transoptorSpeed = rotations * 120.0 * TRANSOPTOR_MULTIPLIER;
+    float transoptorRotationsPerSecond = rotations / (TRANSOPTOR_CALC_INTERVAL_MS / 1000.0);
+    transoptorSpeed = transoptorRotationsPerSecond * 60.0;
+    windSpeed = transoptorRotationsPerSecond * TRANSOPTOR_KMH_PER_RPS;
     lastTransoptorCalcTime = currentMillis;
   }
 
